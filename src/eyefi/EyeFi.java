@@ -185,13 +185,21 @@ public class EyeFi implements ImageProvider {
     int maxErrorCorrectionLevel;
     int pingTimeout;
     boolean terminated = false;
+    int attempts;
+    int maxAttempts;
+    boolean inverse;
+    int[] parameters;
 
-    public EyeFi(int nMessages, int maxVersion, int minErrorCorrectionLevel, int maxErrorCorrectionLevel, int pingTimeout) {
+    public EyeFi(int nMessages, int maxVersion, int minErrorCorrectionLevel, int maxErrorCorrectionLevel, int pingTimeout, int attempts, int maxAttempts, boolean inverse, int[] parameters) {
         this.nMessages = nMessages;
         this.maxVersion = maxVersion;
         this.minErrorCorrectionLevel = minErrorCorrectionLevel;
         this.maxErrorCorrectionLevel = maxErrorCorrectionLevel;
         this.pingTimeout = pingTimeout;
+        this.attempts = attempts;
+        this.maxAttempts = maxAttempts;
+        this.inverse = inverse;
+        this.parameters = parameters;
     }
 
     public void run() {
@@ -252,13 +260,15 @@ public class EyeFi implements ImageProvider {
         String filePath = "img/tux.gif";
         //String filePath = null;
         boolean fullscreen = true;
-        int maxMessages = 5;
+        int maxMessages = 3;
         int maxVersion = QR_CAP.length - 1;
         int minECL = 0;
         int maxECL = QR_CAP[0].length - 1;
         int pingTimeout = 5000;
-        int attempts = 5;
-        int maxAttempts = 20;
+        int attempts = 2;
+        int maxAttempts = 5;
+        boolean inverse = false;
+        int[] parameters = null;
 
         for (Iterator<String> it = Arrays.asList(args).iterator(); it.hasNext();) {
             String arg = it.next();
@@ -323,6 +333,14 @@ public class EyeFi implements ImageProvider {
                 case "--pingTimeout":
                     pingTimeout = Integer.parseInt(it.next());
                     break;
+                case "-i":
+                case "--inversePing":
+                    inverse = true;
+                    break;
+                case "-P":
+                case "--parameters":
+                    parameters = new int[]{Integer.parseInt(it.next()), Integer.parseInt(it.next())};
+                    break;
                 default:
                     System.out.println("Invalid Argument");
                     System.exit(0);
@@ -330,23 +348,44 @@ public class EyeFi implements ImageProvider {
         }
 
         if (!simulate) {
-            EyeFi qrcomm = new EyeFi(maxMessages, maxVersion, minECL, maxECL, pingTimeout);
+            EyeFi qrcomm = new EyeFi(maxMessages, maxVersion, minECL, maxECL, pingTimeout, attempts, maxAttempts, inverse, parameters);
             qrcomm.initWebcam();
             qrcomm.setFullScreen(fullscreen);
             qrcomm.run();
             if (!silent) {
-                String[] buttons = {"Send", "Receive"};
+                ImageIcon icon = new ImageIcon(EyeFi.class.getResource("/eyefi/slogo64.png"));
+                String[] buttons = new String[]{"Send", "Receive"};
                 int rc = JOptionPane.showOptionDialog(null, "What you want to do?", "Welcome",
-                        JOptionPane.DEFAULT_OPTION, 0, new ImageIcon(EyeFi.class.getResource("/eyefi/slogo64.png")), buttons, buttons[1]);
+                        JOptionPane.DEFAULT_OPTION, 0, icon, buttons, buttons[1]);
                 if (rc == 0) {
-//                    JFileChooser chooser = new JFileChooser();
-//                    chooser.setDialogTitle("Choose a file to send");
-//                    int returnVal = chooser.showOpenDialog(qrcomm.getFrame());
-//                    if (returnVal == JFileChooser.APPROVE_OPTION) {
-//                        filePath = chooser.getSelectedFile().getAbsolutePath();
-//                    }
+                    JFileChooser chooser = new JFileChooser();
+                    chooser.setDialogTitle("Choose a file to send");
+                    int returnVal = chooser.showOpenDialog(qrcomm.getFrame());
+                    if (returnVal == JFileChooser.APPROVE_OPTION) {
+                        filePath = chooser.getSelectedFile().getAbsolutePath();
+                    }
                 } else if (rc == 1) {
                     filePath = null;
+                    buttons = new String[]{"Normal", "Inverse", "Manual"};
+                    rc = JOptionPane.showOptionDialog(null, "What you want to do?", "Transfer Rate Benchmark",
+                            JOptionPane.DEFAULT_OPTION, 0, icon, buttons, buttons[1]);
+                    if (rc == 0) {
+                        inverse = false;
+                    } else if (rc == 1) {
+                        inverse = true;
+                    } else {
+                        parameters = new int[]{0, 0, 0};
+                        Integer[] values = new Integer[40];
+                        for (int i = 0; i < 40; i++) {
+                            values[i] = i;
+                        }
+                        parameters[0] = (Integer) JOptionPane.showInputDialog(null, "Select Q RCode version:", "Manual transfer rate", JOptionPane.QUESTION_MESSAGE, icon, values, values[0]);
+                        values = new Integer[4]; 
+                        for (int i = 0; i < 4; i++) {
+                            values[i] = i;
+                        }
+                        parameters[0] = (Integer) JOptionPane.showInputDialog(null, "Select QR Code error correction level:", "Manual transfer rate", JOptionPane.QUESTION_MESSAGE, icon, values, values[0]);
+                    }
                 }
             }
             if (filePath != null && !filePath.isEmpty()) {
@@ -356,8 +395,8 @@ public class EyeFi implements ImageProvider {
             }
         } else {
             final String path = filePath;
-            final EyeFi server = new EyeFi(maxMessages, maxVersion, minECL, maxECL, pingTimeout);
-            final EyeFi client = new EyeFi(maxMessages, maxVersion, minECL, maxECL, pingTimeout);
+            final EyeFi server = new EyeFi(maxMessages, maxVersion, minECL, maxECL, pingTimeout, attempts, maxAttempts, inverse, parameters);
+            final EyeFi client = new EyeFi(maxMessages, maxVersion, minECL, maxECL, pingTimeout, attempts, maxAttempts, inverse, parameters);
             server.setFullScreen(false);
             client.setFullScreen(false);
             server.setImageProvider(client);
@@ -387,7 +426,7 @@ public class EyeFi implements ImageProvider {
                 public void run() {
                     do {
                         client.receiveMode();
-                        System.out.println("#######################################");
+//                        System.out.println("#######################################");
                     } while (false);
                 }
             }.start();
@@ -533,8 +572,10 @@ public class EyeFi implements ImageProvider {
 
     public void receiveMode() {
         frame.setTitle("Client");
-        log("Benchmarking...");
-        int[] parameters = getOptimalTransferParameters(nMessages, maxVersion, minErrorCorrectionLevel, maxErrorCorrectionLevel, pingTimeout);
+        if (parameters == null) {
+            log("Benchmarking...");
+            parameters = getOptimalTransferParameters(nMessages, maxVersion, minErrorCorrectionLevel, maxErrorCorrectionLevel, pingTimeout, inverse);
+        }
         boolean isChecksumValid;
         String filename;
         File file;
@@ -632,7 +673,8 @@ public class EyeFi implements ImageProvider {
         float kbps = 0;
         boolean refreshCycle = false;
         int lastIndex = 0;
-        int error = 0;
+        int currentAttempts = 0;
+        int changeVersion = 0;
         for (int i = start; i < start + size; i += qrCodeCapacity) {
             if (i > lastIndex) {
                 lastIndex = i;
@@ -643,16 +685,18 @@ public class EyeFi implements ImageProvider {
                 read(3000);
             } catch (TimeoutException e) {
                 refreshCycle = true;
-                error++;
-                logOver("Transfer " + (int) (100f - 100 * ((float) buffer.remaining() / size)) + "% complete, remaining " + buffer.remaining() + " Bytes. Lost package " + i + " total " + error + "/5");
-                if (error > 3) {
+                currentAttempts++;
+                logOver("Transfer " + (int) (100f - 100 * ((float) buffer.remaining() / size)) + "% complete, remaining " + buffer.remaining() + " Bytes. Lost package " + i + ", attempt " + changeVersion + "/" + maxAttempts);
+                if (currentAttempts > attempts) {
+                    currentAttempts = 0;
                     version--;
+                    changeVersion++;
                     qrCodeCapacity = QR_CAP[version][errorCorrection] - (1 + counterByteSize);
                     if (progress) {
                         log("");
                     }
                     log("Trying version " + version);
-                    if (error > 30) {
+                    if (changeVersion > maxAttempts) {
                         return null;
                     }
                     continue;
@@ -755,7 +799,7 @@ public class EyeFi implements ImageProvider {
         if (version == 0) {
             read();
         } else if (version < 6) {
-            read(10000);
+            read(timeout * 2);
         } else {
             read(timeout);
         }
@@ -777,21 +821,35 @@ public class EyeFi implements ImageProvider {
         return averagePing;
     }
 
-    public int[] getOptimalTransferParameters(int nMessages, int maxVersion, int minErrorCorrectionLevel, int maxErrorCorrectionLevel, int timeout) {
+    public int[] getOptimalTransferParameters(int nMessages, int maxVersion, int minErrorCorrectionLevel, int maxErrorCorrectionLevel, int timeout, boolean inverse) {
         int[] ret = new int[]{0, 0, 0};
         float max = 0;
         try {
-            for (int v = 0; v <= maxVersion; v++) {
-                for (int ec = minErrorCorrectionLevel; ec <= maxErrorCorrectionLevel; ec++) {
-                    float res = benchmark(v, ec, nMessages, timeout);
-                    log("ping(" + v + "," + ec + "): " + (int) res + " B/s");
-                    if (res > max) {
-                        max = res;
-                        ret[0] = v;
-                        ret[1] = ec;
+            if (inverse) {
+                for (int v = maxVersion; v >= 0; v--) {
+                    for (int ec = minErrorCorrectionLevel; ec <= maxErrorCorrectionLevel; ec++) {
+                        float res = benchmark(v, ec, nMessages, timeout);
+                        log("ping(" + v + "," + ec + "): " + (int) res + " B/s");
+                        if (res > max) {
+                            max = res;
+                            ret[0] = v;
+                            ret[1] = ec;
+                        }
+                        if (res < max / 3) {
+                            throw new TimeoutException();//very slow
+                        }
                     }
-                    if (res < max / 4) {
-                        throw new TimeoutException();//very slow
+                }
+            } else {
+                for (int v = 0; v <= maxVersion; v++) {
+                    for (int ec = minErrorCorrectionLevel; ec <= maxErrorCorrectionLevel; ec++) {
+                        float res = benchmark(v, ec, nMessages, timeout);
+                        log("ping(" + v + "," + ec + "): " + (int) res + " B/s");
+                        if (res > max) {
+                            max = res;
+                            ret[0] = v;
+                            ret[1] = ec;
+                        }
                     }
                 }
             }
