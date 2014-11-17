@@ -315,11 +315,37 @@ public class EyeFi implements ImageProvider {
                     System.out.println();
                     System.out.println("Usage:");
                     System.out.println("  java -jar Eye-Fi.jar [OPTION...]");
+                    System.out.println("  or");
+                    System.out.println("  ./Eye-Fi.jar [OPTION...]");
                     System.out.println();
                     System.out.println("Application Options:");
-                    System.out.println("  -w, --windowed\t\tSet windowed mode");
+                    System.out.println("  -h, --help       \tShow this help page");
+                    System.out.println("  -r, --receiveMode\tSet receive mode");
+                    System.out.println("  -w, --windowed   \tSet windowed mode");
+                    System.out.println("  -f, --file       \tSet file to send");
+                    System.out.println("  -V, --maxVersion \tSet max QR code version [0 to 39]");
+                    System.out.println("  -e, --minECL     \tSet maximum QR code error correction level [0 to 3]");
+                    System.out.println("  -E, --maxECL     \tSet minimum QR code error correction level [0 to 3]");
+                    System.out.println("  -m, --maxMessages\tSet maximum number of messages per test on benchmark [>=1]");
+                    System.out.println("  -a, --attempts   \tSet maximum number of attempts before decrease QR code version");
+                    System.out.println("  -A, --maxAttempts\tSet maximum number of attempts before abort sending [>1]");
+                    System.out.println("  -s, --silent     \tDisable input dialogs");
+                    System.out.println("  -R, --rotate     \tRotate webcam image");
+                    System.out.println("  -S, --simulate   \tSimulate a file transfer between two notebooks");
+                    System.out.println("  -p, --pingTimeout\tSet ping timeout");
+                    System.out.println("  -i, --inversePing\tStart from maximal QR code version and decrease it while benchmarking");
+                    System.out.println("  -P, --parameters \tSet transfer parameters: Version [0 to 39] and ECL [0 to 3]");
                     System.out.println();
-//                    System.out.println("Examples:");
+                    System.out.println("Keyboard shortcuts:");
+                    System.out.println("  L                \tFull log window pop-up");
+                    System.out.println("  1                \tSimulate inteference on client webcam");
+                    System.out.println("  2                \tSimulate inteference on server webcam");
+                    System.out.println("  ESCAPE           \tExit");
+                    System.out.println();
+                    System.out.println("Argument examples:");
+                    System.out.println("  -f img/tux.png -s      \tSend file without dialogs");
+                    System.out.println("  -r -P 5 0 -s           \tReceive file without dialogs with QR code v5 and ECL 0");
+                    System.out.println("  -S -e 1 -E 1 -m 2 -V 39\tLocal simulation");
                     System.exit(0);
                     break;
                 case "-w":
@@ -417,13 +443,23 @@ public class EyeFi implements ImageProvider {
                     }
                 } else if (rc == 1) {
                     filePath = null;
-                    buttons = new String[]{"Normal", "Inverse", "Manual"};
-                    rc = JOptionPane.showOptionDialog(null, "What you want to do?", "Transfer Rate Benchmark",
+                    buttons = new String[]{"Default", "Inverse", "Manual"};
+                    rc = JOptionPane.showOptionDialog(null, "Choose config mode:", "Transfer Rate Benchmark",
                             JOptionPane.DEFAULT_OPTION, 0, icon, buttons, buttons[1]);
                     if (rc == 0) {
-                        inverse = false;
+                        qrcomm.inverse = false;
+                        Integer[] values = new Integer[20];
+                        for (int i = 0; i < 20; i++) {
+                            values[i] = (i + 1) * 500;
+                        }
+                        qrcomm.pingTimeout = (Integer) JOptionPane.showInputDialog(null, "Select the ping timeout in milliseconds:", "Ping timeout", JOptionPane.QUESTION_MESSAGE, icon, values, values[7]);
                     } else if (rc == 1) {
-                        inverse = true;
+                        qrcomm.inverse = true;
+                        Integer[] values = new Integer[20];
+                        for (int i = 0; i < 20; i++) {
+                            values[i] = (i + 1) * 500;
+                        }
+                        qrcomm.pingTimeout = (Integer) JOptionPane.showInputDialog(null, "Select the ping timeout in milliseconds:", "Ping timeout", JOptionPane.QUESTION_MESSAGE, icon, values, values[7]);
                     } else {
                         parameters = new int[]{0, 0, 0};
                         Integer[] values = new Integer[40];
@@ -871,7 +907,7 @@ public class EyeFi implements ImageProvider {
         long t = System.currentTimeMillis();
         if (version == 0) {
             read();
-        } else if (version < 6) {
+        } else if (version <= 3) {
             read(timeout * 2);
         } else {
             read(timeout);
