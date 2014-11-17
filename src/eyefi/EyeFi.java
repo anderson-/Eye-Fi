@@ -8,10 +8,8 @@ package eyefi;
 import com.github.sarxos.webcam.Webcam;
 import com.github.sarxos.webcam.WebcamResolution;
 import com.google.zxing.BinaryBitmap;
-import com.google.zxing.ChecksumException;
 import com.google.zxing.DecodeHintType;
 import com.google.zxing.EncodeHintType;
-import com.google.zxing.FormatException;
 import com.google.zxing.LuminanceSource;
 import com.google.zxing.Result;
 import com.google.zxing.ResultMetadataType;
@@ -26,16 +24,15 @@ import com.google.zxing.qrcode.QRCodeWriter;
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.Image;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
 import java.awt.Toolkit;
 import java.awt.event.KeyEvent;
-import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
@@ -53,27 +50,24 @@ import java.nio.file.Paths;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.Vector;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import javax.activation.MimetypesFileTypeMap;
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
-import javax.swing.JApplet;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.UIManager;
-import javax.swing.UnsupportedLookAndFeelException;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 
 /**
  *
- * @author gnome3
+ * @author Anderson Antunes
  */
 interface ImageProvider {
 
@@ -143,6 +137,8 @@ public class EyeFi implements ImageProvider {
     public static final byte CMD_REQUEST_END = 60;
     public static final byte CMD_END = 70;
 
+    double rotation = 0;
+
     Webcam webcam = null;
     private Dimension videoSize = WebcamResolution.VGA.getSize();
 
@@ -155,7 +151,7 @@ public class EyeFi implements ImageProvider {
     int QRSize = 200;
     int dataSendLength = 0;
 
-    String status = "";
+    ArrayList<String> status = new ArrayList<>();
     int lineCount = 0;
 
     private byte[] dataRecived;
@@ -175,10 +171,10 @@ public class EyeFi implements ImageProvider {
     Result result = null;
 
     boolean fullscreen = true;
+    boolean server;
     private BufferedImage qrCode;
     private ImageProvider imageProvider;
     private JFrame frame;
-    final AffineTransform rotation = AffineTransform.getTranslateInstance(QRSize / 2, QRSize / 2);
     int nMessages;
     int maxVersion;
     int minErrorCorrectionLevel;
@@ -188,7 +184,9 @@ public class EyeFi implements ImageProvider {
     int attempts;
     int maxAttempts;
     boolean inverse;
+    boolean rotate = false;
     int[] parameters;
+    private boolean interference = false;
 
     public EyeFi(int nMessages, int maxVersion, int minErrorCorrectionLevel, int maxErrorCorrectionLevel, int pingTimeout, int attempts, int maxAttempts, boolean inverse, int[] parameters) {
         this.nMessages = nMessages;
@@ -200,6 +198,40 @@ public class EyeFi implements ImageProvider {
         this.maxAttempts = maxAttempts;
         this.inverse = inverse;
         this.parameters = parameters;
+
+        //Rotate image to provide diversity to the reader.
+        //It reduces the throwing of ChecksumException and FormatException
+        //for some reason that I dont know why...
+        new Thread("Rotate") {
+            int i = 0;
+
+            @Override
+            public void run() {
+                while (!terminated) {
+                    rotation += (rotate) ? Math.PI / 2 : 0;
+                    i++;
+                    switch (i % 7) {
+                        case 0:
+                            rotation += .04;
+                            break;
+                        case 2:
+                            rotation += .02;
+                            break;
+                        case 4:
+                            rotation -= .02;
+                            break;
+                        case 6:
+                            rotation -= .04;
+                            break;
+                    }
+                    try {
+                        Thread.sleep(50);
+                    } catch (Exception e) {
+
+                    }
+                }
+            }
+        }.start();
     }
 
     public void run() {
@@ -225,7 +257,7 @@ public class EyeFi implements ImageProvider {
                     public void run() {
                         while (!terminated) {
                             if (webcam != null) {
-                                img = webcam.getImage();
+                                img = shake(webcam.getImage());
                             }
                             try {
                                 Thread.sleep(10);
@@ -257,7 +289,7 @@ public class EyeFi implements ImageProvider {
 
         boolean silent = false;
         boolean simulate = false;
-        String filePath = "img/tux.gif";
+        String filePath = "img/tux.png";
         //String filePath = null;
         boolean fullscreen = true;
         int maxMessages = 3;
@@ -269,12 +301,26 @@ public class EyeFi implements ImageProvider {
         int maxAttempts = 5;
         boolean inverse = false;
         int[] parameters = null;
+        boolean rotate = false;
 
         for (Iterator<String> it = Arrays.asList(args).iterator(); it.hasNext();) {
             String arg = it.next();
             switch (arg) {
                 case "-h":
                 case "--help":
+                    System.out.println("Eye-Fi: Transfer files between notebooks using QR Codes, with only the screen and webcam.");
+                    System.out.println();
+                    System.out.println("Conceived and developed by Anderson Antunes");
+                    System.out.println("GitHub: https://github.com/anderson-/eye-fi");
+                    System.out.println();
+                    System.out.println("Usage:");
+                    System.out.println("  java -jar Eye-Fi.jar [OPTION...]");
+                    System.out.println();
+                    System.out.println("Application Options:");
+                    System.out.println("  -w, --windowed\t\tSet windowed mode");
+                    System.out.println();
+//                    System.out.println("Examples:");
+                    System.exit(0);
                     break;
                 case "-w":
                 case "--windowed":
@@ -321,6 +367,10 @@ public class EyeFi implements ImageProvider {
                 case "--silent":
                     silent = true;
                     break;
+                case "-R":
+                case "--rotate":
+                    rotate = true;
+                    break;
                 case "-S":
                 case "--simulate":
                     simulate = true;
@@ -352,10 +402,11 @@ public class EyeFi implements ImageProvider {
             qrcomm.initWebcam();
             qrcomm.setFullScreen(fullscreen);
             qrcomm.run();
+            qrcomm.rotate = rotate;
+            ImageIcon icon = new ImageIcon(EyeFi.class.getResource("/eyefi/slogo64.png"));
             if (!silent) {
-                ImageIcon icon = new ImageIcon(EyeFi.class.getResource("/eyefi/slogo64.png"));
-                String[] buttons = new String[]{"Send", "Receive"};
-                int rc = JOptionPane.showOptionDialog(null, "What you want to do?", "Welcome",
+                String[] buttons = new String[]{"Send file", "Receive file"};
+                int rc = JOptionPane.showOptionDialog(null, "Notebook file transfer through QR codes,\nusing only the screen and webcam.\n\nhttps://github.com/anderson-/eye-fi\n\nBy Anderson Antunes\n\nWhat you want to do?", "Welcome to Eye-Fi!",
                         JOptionPane.DEFAULT_OPTION, 0, icon, buttons, buttons[1]);
                 if (rc == 0) {
                     JFileChooser chooser = new JFileChooser();
@@ -380,18 +431,36 @@ public class EyeFi implements ImageProvider {
                             values[i] = i;
                         }
                         parameters[0] = (Integer) JOptionPane.showInputDialog(null, "Select Q RCode version:", "Manual transfer rate", JOptionPane.QUESTION_MESSAGE, icon, values, values[0]);
-                        values = new Integer[4]; 
+                        values = new Integer[4];
                         for (int i = 0; i < 4; i++) {
                             values[i] = i;
                         }
-                        parameters[0] = (Integer) JOptionPane.showInputDialog(null, "Select QR Code error correction level:", "Manual transfer rate", JOptionPane.QUESTION_MESSAGE, icon, values, values[0]);
+                        parameters[1] = (Integer) JOptionPane.showInputDialog(null, "Select QR Code error correction level:", "Manual transfer rate", JOptionPane.QUESTION_MESSAGE, icon, values, values[0]);
+                        qrcomm.parameters = parameters;
                     }
                 }
             }
             if (filePath != null && !filePath.isEmpty()) {
                 qrcomm.serverMode(filePath);
             } else {
-                qrcomm.receiveMode();
+                File file = qrcomm.receiveMode();
+                if (!silent) {
+                    String[] buttons = new String[]{"Yes", "No"};
+                    int rc = JOptionPane.showOptionDialog(null, "Do you want to open received file with\nthe default associated program?", "Open received file",
+                            JOptionPane.DEFAULT_OPTION, 0, icon, buttons, buttons[1]);
+                    if (rc == 0) {
+                        try {
+                            Desktop.getDesktop().open(file);
+                        } catch (IOException ex) {
+                        }
+                    }
+                } else {
+                    if (isFileImage(file)) {
+                        qrcomm.showPictureFrame(file, file.getName());
+                    } else {
+                        qrcomm.log("No visualization available.");
+                    }
+                }
             }
         } else {
             final String path = filePath;
@@ -403,6 +472,8 @@ public class EyeFi implements ImageProvider {
             client.setImageProvider(server);
             server.run();
             client.run();
+            server.rotate = true;
+            client.rotate = true;
             Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
             double width = screenSize.getWidth();
             double height = screenSize.getHeight();
@@ -425,7 +496,12 @@ public class EyeFi implements ImageProvider {
                 @Override
                 public void run() {
                     do {
-                        client.receiveMode();
+                        File file = client.receiveMode();
+                        if (isFileImage(file)) {
+                            client.showPictureFrame(file, file.getName());
+                        } else {
+                            client.log("No visualization available.");
+                        }
 //                        System.out.println("#######################################");
                     } while (false);
                 }
@@ -498,7 +574,6 @@ public class EyeFi implements ImageProvider {
                 buffer.put(fileArray);
                 data = buffer.array();
             }
-            showPictureFrame(new File(filePath), "");
             log("Loaded \"" + fileName + "\"[" + fileNameLength + "], providing " + dataLen + " Bytes.");
 
             while (true) {
@@ -570,7 +645,7 @@ public class EyeFi implements ImageProvider {
         }
     }
 
-    public void receiveMode() {
+    public File receiveMode() {
         frame.setTitle("Client");
         if (parameters == null) {
             log("Benchmarking...");
@@ -607,13 +682,11 @@ public class EyeFi implements ImageProvider {
                     + (transfertime > 60 ? (int) (transfertime / 60f) + " min" : (int) transfertime + " s") + " at "
                     + (filesize > 1000 ? (int) ((filesize / 1000f) / seconds) + " kB/s" : (int) (filesize / seconds) + " B/s"));
             isChecksumValid = fileChecksum(file);
-            log("Checksum valid? " + (isChecksumValid ? "yes" : "no"));
+            log("Checksum valid? " + (isChecksumValid ? "Yes" : "No"));
         } while (!isChecksumValid && false);
         file = copyFile(file, new File("received" + filename));
-        if (isFileImage(file)) {
-            showPictureFrame(file, filename);
-        }
-//        terminate();
+        log("File saved as: " + file.getAbsolutePath());
+        return file;
     }
 
     public static boolean isFileImage(File file) {
@@ -835,8 +908,8 @@ public class EyeFi implements ImageProvider {
                             ret[0] = v;
                             ret[1] = ec;
                         }
-                        if (res < max / 3) {
-                            throw new TimeoutException();//very slow
+                        if (res < max / 2) {
+                            throw new TimeoutException();
                         }
                     }
                 }
@@ -896,41 +969,6 @@ public class EyeFi implements ImageProvider {
 
     private void setImageProvider(ImageProvider imageProvider) {
         this.imageProvider = imageProvider;
-        if (imageProvider instanceof EyeFi) {
-            //Rotate image to provide diversity to the reader.
-            //It reduces the throwing of ChecksumException and FormatException
-            //for some reason that I dont know why...
-            new Thread("Rotate") {
-                int i = 0;
-
-                @Override
-                public void run() {
-                    while (!terminated) {
-                        rotation.rotate(Math.PI / 2);
-                        i++;
-                        switch (i % 7) {
-                            case 0:
-                                rotation.rotate(.04);
-                                break;
-                            case 2:
-                                rotation.rotate(.02);
-                                break;
-                            case 4:
-                                rotation.rotate(-.02);
-                                break;
-                            case 6:
-                                rotation.rotate(-.04);
-                                break;
-                        }
-                        try {
-                            Thread.sleep(50);
-                        } catch (Exception e) {
-
-                        }
-                    }
-                }
-            }.start();
-        }
     }
 
     private void setFullScreen(boolean fullscreen) {
@@ -975,11 +1013,15 @@ public class EyeFi implements ImageProvider {
 
                 {
                     int y = 20;
-                    for (String line : status.split("\n")) {
-                        g2.drawString(line, height + 20, y += g.getFontMetrics().getHeight());
+                    for (int i = status.size() - 16; i < status.size(); i++) {
+                        //for (String line : status) {
+                        if (i >= 0) {
+                            String line = status.get(i);
+                            g2.drawString(line, height + 20, y += g.getFontMetrics().getHeight());
+                        }
                     }
                 }
-
+                boolean img = false;
                 if (imageProvider != null && imageProvider.getImage() != null) {
                     g2.setColor(Color.white);
                     if (imageProvider.getObject() instanceof Webcam) {
@@ -994,20 +1036,30 @@ public class EyeFi implements ImageProvider {
                             g2.setColor(Color.green);
                         }
                         for (ResultPoint p : result.getResultPoints()) {
-                            g2.fillOval((int) map(p.getX(), 0, videoSize.width, 0, 160) + (width - 160), (int) map(p.getY(), 0, videoSize.height, 0, 120) + (height - 120), 7, 7);
+                            g2.fillOval((int) map(p.getX(), 0, imageProvider.getImage().getWidth(), 0, 160) + (width - 160), (int) map(p.getY(), 0, imageProvider.getImage().getHeight(), 0, 120) + (height - 120), 7, 7);
                         }
                     }
-                } else {
-                    g2.setColor(Color.darkGray);
+                    img = true;
+                }
+
+                if (!img || interference) {
                     int x = width - 160;
                     int y = height - 120;
                     int w = 160;
                     int h = 120;
-                    g2.drawRect(x, y, w, h);
-                    g2.drawLine(x, y, x + w, y + h);
-                    g2.drawLine(x, y + h, x + w, y);
-                    g2.setColor(Color.white);
-                    g2.drawString("Waiting...", x + w / 2 - 30, y + h / 2 + 5);
+                    if (interference) {
+                        g2.setColor(new Color(40, 10, 10, 230));
+                        g2.fillRect(x, y, w, h);
+                        g2.setColor(Color.red);
+                        g2.drawString("Interference On", x + w / 2 - 60, y + h / 2 + 5);
+                    } else {
+                        g2.setColor(Color.darkGray);
+                        g2.drawRect(x, y, w, h);
+                        g2.drawLine(x, y, x + w, y + h);
+                        g2.drawLine(x, y + h, x + w, y);
+                        g2.setColor(Color.white);
+                        g2.drawString("Waiting...", x + w / 2 - 35, y + h / 2 + 5);
+                    }
                 }
 
                 if (maxError > 0) {
@@ -1053,6 +1105,30 @@ public class EyeFi implements ImageProvider {
                         case KeyEvent.VK_ESCAPE:
                             System.exit(0);
                             break;
+                        case KeyEvent.VK_1:
+                            if (frame.getTitle().equals("Client")) {
+                                interference = !interference;
+                            }
+                            break;
+                        case KeyEvent.VK_2:
+                            if (frame.getTitle().equals("Server")) {
+                                interference = !interference;
+                            }
+                            break;
+                        case KeyEvent.VK_L:
+                            JFrame window = new JFrame();
+                            window.setTitle(frame.getTitle() + " full log");
+                            window.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+                            JTextArea textArea = new JTextArea();
+                            StringBuilder sb = new StringBuilder();
+                            for (String s : new ArrayList<>(status)) {
+                                sb.append(s).append("\n");
+                            }
+                            textArea.setText(sb.toString());
+                            window.add(new JScrollPane(textArea));
+                            window.pack();
+                            window.setVisible(true);
+                            break;
                     }
                 } else if (e.getID() == KeyEvent.KEY_TYPED) {
                 }
@@ -1075,16 +1151,18 @@ public class EyeFi implements ImageProvider {
 
     private void logOver(String newStatus) {
         System.out.println(newStatus);
-        status = status.substring(0, status.lastIndexOf("\n") + 1) + newStatus;
+        status.set(status.size() - 1, newStatus);
+        //status = status.substring(0, status.lastIndexOf("\n") + 1) + newStatus;
     }
 
     private void log(String newStatus) {
         System.out.println(newStatus);
-        if (lineCount > 16) {
-            status = status.substring(status.indexOf("\n") + 1, status.length());
-        }
-        status += newStatus + "\n";
-        lineCount++;
+        status.add(newStatus);
+//        if (lineCount > 16) {
+//            status = status.substring(status.indexOf("\n") + 1, status.length());
+//        }
+//        status += newStatus + "\n";
+//        lineCount++;
     }
 
     static public final double map(double value, double istart, double istop, double ostart, double ostop) {
@@ -1097,7 +1175,9 @@ public class EyeFi implements ImageProvider {
         readerTempCounter = (readerTempCounter == 30) ? 1 : readerTempCounter + 1;
 
         try {
-
+            if (interference) {
+                throw new Exception();
+            }
             // Now test to see if it has a QR code embedded in it
             LuminanceSource source = new BufferedImageLuminanceSource(img);
             BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));
@@ -1141,21 +1221,13 @@ public class EyeFi implements ImageProvider {
 
             error = 0;
 
-        } catch (com.google.zxing.NotFoundException n) {
-
-            error++;
-
+        } catch (Exception n) {
             readOk = false;
-
+            error++;
             if (maxError > 0 && error >= maxError) {
                 secondaryCounter++;
                 error = 0;
             }
-
-        } catch (ChecksumException | FormatException e) {
-            readOk = false;
-            error++;
-            //e.printStackTrace(); 
         }
 
         if (readerTempCounter == 1) {
@@ -1188,21 +1260,29 @@ public class EyeFi implements ImageProvider {
 
     @Override
     public BufferedImage getImage() {
-        BufferedImage img = new BufferedImage(QRSize, QRSize, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2 = img.createGraphics();
-        g2.setColor(Color.white);
-        g2.fillRect(0, 0, QRSize, QRSize);
-        //rotation.rotate(.01);
-        g2.setTransform(rotation);
-        g2.drawImage(qrCode, -QRSize / 2, -QRSize / 2, QRSize, QRSize, Color.BLACK, null);
-        g2.dispose();
-
-        return img;
+        return shake(qrCode);
     }
 
     @Override
     public Object getObject() {
         return this;
+    }
+
+    public BufferedImage shake(BufferedImage inImg) {
+        if (inImg == null) {
+            return null;
+        }
+        BufferedImage outImg = new BufferedImage(inImg.getWidth(), inImg.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        int w = inImg.getWidth();
+        int h = inImg.getHeight();
+        Graphics2D g2 = outImg.createGraphics();
+        g2.setColor(Color.black);
+        g2.fillRect(0, 0, inImg.getWidth(), inImg.getHeight());
+        g2.translate(inImg.getWidth() / 2, inImg.getHeight() / 2);
+        g2.rotate(rotation);
+        g2.drawImage(inImg, -inImg.getWidth() / 2, -inImg.getHeight() / 2, inImg.getWidth(), inImg.getHeight(), Color.BLACK, null);
+        g2.dispose();
+        return outImg;
     }
 
     public static float incrementalAverageIteration(float previousAverage, float value, int iterationIndex) {
