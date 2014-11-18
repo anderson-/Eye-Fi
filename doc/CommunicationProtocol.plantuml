@@ -1,0 +1,74 @@
+@startuml
+
+skinparam shadowing false
+
+skinparam sequence {
+	ArrowColor Black
+	ActorBorderColor Black
+	LifeLineBorderColor Black
+	LifeLineBackgroundColor White
+	
+	ParticipantBorderColor Black
+	ParticipantBackgroundColor White
+	ParticipantFontColor Black
+	
+	ActorBackgroundColor White
+	ActorFontColor Black
+}
+
+title The Communication Protocol
+
+actor cuser as "Receiver"
+participant client as "Client\nNotebook"
+participant server as "Server\nNotebook"
+actor suser as "Sender"
+
+cuser -> client : Select "Receive file"
+activate client
+client ->x server : Request random QR code version 0
+...
+suser -> server : Select "Send file"
+activate server
+==== Benchmark ==
+client -> client: benchmark(...);
+activate client #GreenYellow
+group Version loop X [0 ... 39]
+group ECL loop Y [0 ... 3]
+    alt
+        client -> server : Request random QR code version <b>X</b> ECL <b>Y</b>
+        server --> client : Send random QR code version <b>X</b> ECL <b>Y</b>
+    else QR code too dense to identify
+        client -> server : Request random QR code version <b>X</b> ECL <b>Y</b>
+        server -->x client : Send random QR code version <b>X</b> ECL <b>Y</b>
+        deactivate client
+    end
+end
+end
+==== Transfer ==
+client -> client: receiveFile(...);
+activate client #LightSeaGreen 
+group Checksum error loop
+    group Chunk request loop Z [0 ... (Filesize / QRCodeDataLength)]
+        alt
+            client -> server : Request file chunk <b>Z</b> version <b>V</b>
+            server --> client : Send file chunk <b>Z</b> version <b>V</b>
+        else QR code read exception
+            client -> server : Request file chunk <b>Z</b> version <b>(V-1)</b>
+            server --> client : Send file chunk <b>Z</b> version <b>(V-1)</b>
+        end
+    end
+    
+    client -> client: requestChecksum(...);
+    activate client #OrangeRed  
+        client -> server : Request file checksum
+        server --> client : Send file checksum
+    deactivate client
+    deactivate client
+end
+==== End ==
+client --> cuser : File delivered
+...
+suser -> server: Close application
+deactivate server
+cuser -> client: Close application
+deactivate client
